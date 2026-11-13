@@ -79,3 +79,23 @@ func TestUeIPPool_ExcludeRange(t *testing.T) {
 		ueIPPool.Release(allocate)
 	}
 }
+
+func TestUeIPPoolAllocatedExcludesStaticRange(t *testing.T) {
+	dynamic := context.NewUEIPPool(&factory.UEIPPool{Cidr: "10.10.0.0/24"})
+	static := context.NewUEIPPool(&factory.UEIPPool{Cidr: "10.10.0.0/28"})
+	require.NotNil(t, dynamic)
+	require.NotNil(t, static)
+	require.Equal(t, 0, dynamic.Allocated())
+
+	require.NoError(t, dynamic.Exclude(static))
+	require.Equal(t, 0, dynamic.Allocated(), "reserved static range is not an allocation")
+
+	a := dynamic.Allocate(nil)
+	b := dynamic.Allocate(nil)
+	require.NotNil(t, a)
+	require.NotNil(t, b)
+	require.Equal(t, 2, dynamic.Allocated())
+
+	dynamic.Release(a)
+	require.Equal(t, 1, dynamic.Allocated())
+}

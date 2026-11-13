@@ -670,6 +670,26 @@ func (c *SMContext) SelectDefaultDataPath() error {
 	return nil
 }
 
+// pccRuleUpPath returns the UP path used for a PCC rule data path.
+//
+// Local patch (free5gc-helm lab): outside ULCL, and when the rule does not steer
+// traffic to a specific DNAI, follow the UPF selected for this session
+// (c.SelectedUPF, the same UPF that allocated the UE IP) instead of the SMF-wide
+// DefaultUserPlanePath cache. Upstream v1.4.6 caches one path per DNN/S-NSSAI for
+// the SMF lifetime, so every session anchors on the first UPF ever chosen even
+// when its UE IP comes from another UPF's pool.
+func (c *SMContext) pccRuleUpPath(param *UPFSelectionParams) UPPath {
+	upi := GetUserPlaneInformation()
+	if !GetSelf().ULCLSupport && param.Dnai == "" && c.SelectedUPF != nil {
+		if path := upi.GetDefaultUserPlanePathByDNNAndUPF(param, c.SelectedUPF); path != nil {
+			c.Log.Infof("PCC rule data path follows selected UPF[%s]", c.SelectedUPF.Name)
+			return path
+		}
+		c.Log.Warnf("No path to selected UPF[%s], falling back to DNN default path", c.SelectedUPF.Name)
+	}
+	return upi.GetDefaultUserPlanePathByDNN(param)
+}
+
 func (c *SMContext) CreatePccRuleDataPath(pccRule *PCCRule,
 	tcData *TrafficControlData, qosData *models.Pcf_SMPolCtrl_QosData,
 	chgData *models.Pcf_SMPolCtrl_ChargingData, pduChgDatas []*models.Pcf_SMPolCtrl_ChargingData,
@@ -686,7 +706,7 @@ func (c *SMContext) CreatePccRuleDataPath(pccRule *PCCRule,
 		},
 		Dnai: targetRoute.Dnai,
 	}
-	createdUpPath := GetUserPlaneInformation().GetDefaultUserPlanePathByDNN(param)
+	createdUpPath := c.pccRuleUpPath(param)
 	createdDataPath := GenerateDataPath(createdUpPath)
 	if createdDataPath == nil {
 		return fmt.Errorf("fail to create data path for pcc rule[%s]", pccRule.PccRuleId)
@@ -734,7 +754,7 @@ func (c *SMContext) CreateDcPccRuleDataPathOnDcTunnel(pccRule *PCCRule,
 		},
 		Dnai: targetRoute.Dnai,
 	}
-	createdUpPath := GetUserPlaneInformation().GetDefaultUserPlanePathByDNN(param)
+	createdUpPath := c.pccRuleUpPath(param)
 	createdDataPath := GenerateDataPath(createdUpPath)
 	if createdDataPath == nil {
 		return fmt.Errorf("fail to create data path on DCTunnel for pcc rule[%s]", pccRule.PccRuleId)

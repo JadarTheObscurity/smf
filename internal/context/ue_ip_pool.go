@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync/atomic"
 
 	"github.com/free5gc/smf/internal/context/pool"
 	"github.com/free5gc/smf/internal/logger"
@@ -15,6 +16,9 @@ import (
 type UeIPPool struct {
 	ueSubNet *net.IPNet
 	pool     *pool.LazyReusePool
+	// allocated counts addresses handed to UEs. Reservations (network and
+	// broadcast address, static ranges) are not allocations and are not counted.
+	allocated atomic.Int64
 }
 
 func NewUEIPPool(factoryPool *factory.UEIPPool) *UeIPPool {
@@ -64,6 +68,7 @@ func (ueIPPool *UeIPPool) Allocate(request net.IP) net.IP {
 	}
 
 RETURNIP:
+	ueIPPool.allocated.Add(1)
 	retIP := uint32ToIP(uint32(allocVal))
 	logger.CtxLog.Infof("Allocated UE IP address: %s", retIP)
 	return retIP
@@ -76,6 +81,11 @@ func (ueIPPool *UeIPPool) Exclude(excludePool *UeIPPool) error {
 		return fmt.Errorf("exclude uePool fail: %v", err)
 	}
 	return nil
+}
+
+// Allocated returns the number of UE addresses currently in use from this pool.
+func (ueIPPool *UeIPPool) Allocated() int {
+	return int(ueIPPool.allocated.Load())
 }
 
 func (u *UeIPPool) Pool() *pool.LazyReusePool {
@@ -93,6 +103,8 @@ func (ueIPPool *UeIPPool) Release(addr net.IP) {
 	res := ueIPPool.pool.Free(int(addrVal))
 	if !res {
 		logger.CtxLog.Warnf("failed to release UE Address: %s", addr)
+	} else {
+		ueIPPool.allocated.Add(-1)
 	}
 	logger.CtxLog.Debug(ueIPPool.dump())
 }

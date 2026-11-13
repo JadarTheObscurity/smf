@@ -924,8 +924,48 @@ func (upi *UserPlaneInformation) selectUPPathSource() (*UPNode, error) {
 	return nil, errors.New("AN Node not found")
 }
 
+// upfSelectionMu serializes "read loads, pick UPF, allocate IP" so that
+// concurrent establishments see each other's allocations.
+var upfSelectionMu sync.Mutex
+
+// upfActiveSessions approximates the load of a UPF by the number of UE
+// addresses allocated from all of its pools (one per PDU session anchored there).
+func upfActiveSessions(node *UPNode) int {
+	n := 0
+	for _, snssaiInfo := range node.UPF.SNssaiInfos {
+		for _, dnnInfo := range snssaiInfo.DnnList {
+			for _, p := range dnnInfo.UeIPPools {
+				n += p.Allocated()
+			}
+			for _, p := range dnnInfo.StaticIPPools {
+				n += p.Allocated()
+			}
+		}
+	}
+	return n
+}
+
+// sortUPFListByLoad orders candidates by active sessions, fewest first.
+// The input is sorted by name, and the stable sort keeps that order on ties.
+func (upi *UserPlaneInformation) sortUPFListByLoad(upfList []*UPNode) []*UPNode {
+	loads := make(map[*UPNode]int, len(upfList))
+	for _, node := range upfList {
+		loads[node] = upfActiveSessions(node)
+	}
+	sorted := append([]*UPNode(nil), upfList...)
+	sort.SliceStable(sorted, func(i, j int) bool { return loads[sorted[i]] < loads[sorted[j]] })
+	desc := ""
+	for _, node := range sorted {
+		desc += fmt.Sprintf(" %s=%d", upi.GetUPFNameByIp(node.NodeID.ResolveNodeIdToIp().String()), loads[node])
+	}
+	logger.CtxLog.Infof("UPF selection by fewest sessions, try order:%s", desc)
+	return sorted
+}
+
 // SelectUPFAndAllocUEIP will return anchor UPF, allocated UE IP and use/not use static IP
 func (upi *UserPlaneInformation) SelectUPFAndAllocUEIP(selection *UPFSelectionParams) (*UPNode, net.IP, bool) {
+	upfSelectionMu.Lock()
+	defer upfSelectionMu.Unlock()
 	source, err := upi.selectUPPathSource()
 	if err != nil {
 		return nil, nil, false
@@ -939,7 +979,7 @@ func (upi *UserPlaneInformation) SelectUPFAndAllocUEIP(selection *UPFSelectionPa
 		return nil, nil, false
 	}
 	UPFList = upi.sortUPFListByName(UPFList)
-	sortedUPFList := createUPFListForSelection(UPFList)
+	sortedUPFList := upi.sortUPFListByLoad(UPFList)
 	for _, upf := range sortedUPFList {
 		logger.CtxLog.Debugf("check start UPF: %s",
 			upi.GetUPFNameByIp(upf.NodeID.ResolveNodeIdToIp().String()))
@@ -971,11 +1011,6 @@ func (upi *UserPlaneInformation) SelectUPFAndAllocUEIP(selection *UPFSelectionPa
 	logger.CtxLog.Warnf("UE IP pool exhausted for DNN[%s] S-NSSAI[sst: %d sd: %s] DNAI[%s]\n", selection.Dnn,
 		selection.SNssai.Sst, selection.SNssai.Sd, selection.Dnai)
 	return nil, nil, false
-}
-
-func createUPFListForSelection(inputList []*UPNode) (outputList []*UPNode) {
-	offset := rand.Intn(len(inputList))
-	return append(inputList[offset:], inputList[:offset]...)
 }
 
 func createPoolListForSelection(inputList []*UeIPPool) (outputList []*UeIPPool) {
