@@ -54,7 +54,8 @@ func (s *Server) getUPIRoutes() []Route {
 	}
 }
 
-// GetLoadControl lists, per UPF, the LCI used for UPF selection and the active session count.
+// GetLoadControl lists, per UPF, the LCI used for UPF selection, the active
+// session count and the PFCP association state.
 func (s *Server) GetLoadControl(c *gin.Context) {
 	upi := smf_context.GetSelf().UserPlaneInformation
 	upi.Mu.RLock()
@@ -62,16 +63,30 @@ func (s *Server) GetLoadControl(c *gin.Context) {
 
 	out := gin.H{}
 	for name, node := range upi.UPFs {
-		entry := gin.H{
-			"nodeID":   node.UPF.NodeID.ResolveNodeIdToIp().String(),
-			"sessions": node.ActiveSessions(),
-		}
-		if lc, ok := node.UPF.LoadControl(); ok {
-			entry["lci"] = lc
-		}
-		out[name] = entry
+		out[name] = loadControlEntry(node)
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+// loadControlEntry is one UPF in GET /upi/v1/lci.
+// lab patch 4c: "association" is the PFCP association state (down, setting-up,
+// established, releasing); "associationGeneration" increases whenever the
+// association is established or torn down (heartbeat loss, changed Recovery
+// Time Stamp, release), so a different value than the last one seen means the
+// UPF re-associated (e.g. it restarted), its PFCP sessions were released and
+// its LCI was cleared.
+func loadControlEntry(node *smf_context.UPNode) gin.H {
+	state, generation := node.UPF.AssociationStateAndGeneration()
+	entry := gin.H{
+		"nodeID":                node.UPF.NodeID.ResolveNodeIdToIp().String(),
+		"sessions":              node.ActiveSessions(),
+		"association":           state.String(),
+		"associationGeneration": generation,
+	}
+	if lc, ok := node.UPF.LoadControl(); ok {
+		entry["lci"] = lc
+	}
+	return entry
 }
 
 // PutUpNodeLoadControl injects a Load Control Information for one UPF, with the
