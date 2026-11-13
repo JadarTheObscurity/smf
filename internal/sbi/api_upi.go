@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	smf_context "github.com/free5gc/smf/internal/context"
+	"github.com/free5gc/smf/internal/logger"
 	"github.com/free5gc/smf/pkg/factory"
 	"github.com/free5gc/util/metrics/sbi"
 )
@@ -38,7 +39,82 @@ func (s *Server) getUPIRoutes() []Route {
 			Pattern: "/upNodesLinks/:upNodeRef",
 			APIFunc: s.DeleteUpNodeLink,
 		},
+		{
+			Name:    "GetLoadControl",
+			Method:  http.MethodGet,
+			Pattern: "/lci",
+			APIFunc: s.GetLoadControl,
+		},
+		{
+			Name:    "PutUpNodeLoadControl",
+			Method:  http.MethodPut,
+			Pattern: "/upNodesLinks/:upNodeRef/lci",
+			APIFunc: s.PutUpNodeLoadControl,
+		},
 	}
+}
+
+// GetLoadControl lists, per UPF, the LCI used for UPF selection and the active session count.
+func (s *Server) GetLoadControl(c *gin.Context) {
+	upi := smf_context.GetSelf().UserPlaneInformation
+	upi.Mu.RLock()
+	defer upi.Mu.RUnlock()
+
+	out := gin.H{}
+	for name, node := range upi.UPFs {
+		entry := gin.H{
+			"nodeID":   node.UPF.NodeID.ResolveNodeIdToIp().String(),
+			"sessions": node.ActiveSessions(),
+		}
+		if lc, ok := node.UPF.LoadControl(); ok {
+			entry["lci"] = lc
+		}
+		out[name] = entry
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// PutUpNodeLoadControl injects a Load Control Information for one UPF, with the
+// same rules as an LCI received over PFCP (lab: simulated LCI, TS 29.244 §6.2.3).
+func (s *Server) PutUpNodeLoadControl(c *gin.Context) {
+	var req struct {
+		SequenceNumber *uint32 `json:"sequenceNumber" binding:"required"`
+		Metric         *uint8  `json:"metric" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Set(sbi.IN_PB_DETAILS_CTX_STR, http.StatusText(http.StatusBadRequest))
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	upNodeRef := c.Params.ByName("upNodeRef")
+	upi := smf_context.GetSelf().UserPlaneInformation
+	upi.Mu.RLock()
+	upNode, ok := upi.UPNodes[upNodeRef]
+	upi.Mu.RUnlock()
+	if !ok || upNode.Type != smf_context.UPNODE_UPF || upNode.UPF == nil {
+		c.Set(sbi.IN_PB_DETAILS_CTX_STR, http.StatusText(http.StatusNotFound))
+		c.JSON(http.StatusNotFound, gin.H{"error": "no UPF named " + upNodeRef})
+		return
+	}
+
+	accepted, err := upNode.UPF.UpdateLoadControl(*req.SequenceNumber, *req.Metric, smf_context.LoadControlSourceUPI)
+	if err != nil {
+		c.Set(sbi.IN_PB_DETAILS_CTX_STR, http.StatusText(http.StatusBadRequest))
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	current, _ := upNode.UPF.LoadControl()
+	if !accepted {
+		c.Set(sbi.IN_PB_DETAILS_CTX_STR, http.StatusText(http.StatusConflict))
+		c.JSON(http.StatusConflict, gin.H{
+			"accepted": false, "error": "sequenceNumber is not higher than the stored one", "lci": current,
+		})
+		return
+	}
+	logger.SBILog.Infof("UPF[%s] Load Control Information: sequence %d, metric %d (upi)",
+		upNodeRef, current.SequenceNumber, current.Metric)
+	c.JSON(http.StatusOK, gin.H{"accepted": true, "lci": current})
 }
 
 func (s *Server) GetUpNodesLinks(c *gin.Context) {

@@ -91,6 +91,10 @@ type UPF struct {
 	// Modification with PFCP Association Release.
 	sessionWorkGate sync.RWMutex
 
+	// Latest Load Control Information (TS 29.244 §6.2.3), see load_control.go.
+	lciMu sync.RWMutex
+	lci   *LoadControl
+
 	SNssaiInfos  []*SnssaiUPFInfo
 	N3Interfaces []*UPFInterfaceInfo
 	N9Interfaces []*UPFInterfaceInfo
@@ -246,6 +250,7 @@ func (upf *UPF) EstablishAssociation(parent context.Context) context.Context {
 	upf.cancelAssociation = cancel
 	upf.associationState = AssociationEstablished
 	upf.associationMu.Unlock()
+	upf.ClearLoadControl()
 
 	if previousCancel != nil {
 		previousCancel()

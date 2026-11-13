@@ -78,7 +78,11 @@ type PfcpServer struct {
 
 	sessionReportMu      sync.RWMutex
 	sessionReportHandler SessionReportHandler
-	log                  *logrus.Entry
+
+	loadControlMu      sync.RWMutex
+	loadControlHandler LoadControlHandler
+
+	log *logrus.Entry
 }
 
 func NewPfcpServer(smf smfIface, addr string) *PfcpServer {

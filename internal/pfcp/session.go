@@ -76,6 +76,7 @@ func (s *PfcpServer) SendSessionEstablishmentRequest(
 			)
 		}
 	}
+	s.reportLoadControl(addr.IP, response.LoadControlInformation)
 	return response, nil
 }
 
@@ -130,6 +131,7 @@ func (s *PfcpServer) SendSessionModificationRequest(
 			"decode PFCP Session Modification Response Cause from %v: %w", addr, err,
 		)
 	}
+	s.reportLoadControl(addr.IP, response.LoadControlInformation)
 	return response, nil
 }
 
@@ -184,5 +186,6 @@ func (s *PfcpServer) SendSessionDeletionRequest(
 			"decode PFCP Session Deletion Response Cause from %v: %w", addr, err,
 		)
 	}
+	s.reportLoadControl(addr.IP, response.LoadControlInformation)
 	return response, nil
 }

@@ -32,7 +32,7 @@ func (s *PfcpServer) handleAssociationSetupRequest(
 ) (*message.AssociationSetupResponse, func()) {
 	responseIEs := []*ie.IE{
 		ie.NewCause(ie.CauseMandatoryIEMissing),
-		ie.NewCPFunctionFeatures(0),
+		ie.NewCPFunctionFeatures(cpFeatureLOAD),
 		ie.NewRecoveryTimeStamp(s.RecoveryTime()),
 	}
 	if localNodeID := s.localNodeIDIE(); localNodeID != nil {
@@ -82,7 +82,7 @@ func (s *PfcpServer) handleAssociationUpdateRequest(
 ) (*message.AssociationUpdateResponse, func()) {
 	responseIEs := []*ie.IE{
 		ie.NewCause(ie.CauseMandatoryIEMissing),
-		ie.NewCPFunctionFeatures(0),
+		ie.NewCPFunctionFeatures(cpFeatureLOAD),
 	}
 	if localNodeID := s.localNodeIDIE(); localNodeID != nil {
 		responseIEs = append([]*ie.IE{localNodeID}, responseIEs...)
@@ -214,7 +214,7 @@ func (s *PfcpServer) SendAssociationSetupRequest(
 		0, // TxTransaction assigns the final 24-bit sequence number.
 		s.localNodeIDIE(),
 		ie.NewRecoveryTimeStamp(s.RecoveryTime()),
-		ie.NewCPFunctionFeatures(0),
+		ie.NewCPFunctionFeatures(cpFeatureLOAD),
 	)
 	received, err := s.sendRequest(ctx, request, addr)
 	if err != nil {

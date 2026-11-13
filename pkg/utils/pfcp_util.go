@@ -29,6 +29,7 @@ func InitPFCPFunc(pCtx context.Context) (func(app *service.SmfApp) error, func()
 		newServer := pfcp.NewPfcpServer(app, smfContext.ListenIP().String())
 		newServer.SetAssociationStateManager(app.Processor())
 		newServer.SetSessionReportHandler(app.Processor())
+		newServer.SetLoadControlHandler(app.Processor())
 		if err := newServer.Run(&serverWG); err != nil {
 			smfContext.PfcpCancelFunc()
 			return err

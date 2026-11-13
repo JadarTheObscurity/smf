@@ -1,6 +1,8 @@
 package pfcp
 
 import (
+	"net"
+
 	"github.com/wmnsk/go-pfcp/ie"
 	"github.com/wmnsk/go-pfcp/message"
 )
@@ -20,7 +22,11 @@ func (s *PfcpServer) SetSessionReportHandler(handler SessionReportHandler) {
 
 func (s *PfcpServer) handleSessionReportRequest(
 	request *message.SessionReportRequest,
+	addr *net.UDPAddr,
 ) *message.SessionReportResponse {
+	if addr != nil {
+		s.reportLoadControl(addr.IP, request.LoadControlInformation)
+	}
 	cause := ie.CauseServiceNotSupported
 	remoteSEID := uint64(0)
 

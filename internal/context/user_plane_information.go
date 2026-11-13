@@ -928,9 +928,9 @@ func (upi *UserPlaneInformation) selectUPPathSource() (*UPNode, error) {
 // concurrent establishments see each other's allocations.
 var upfSelectionMu sync.Mutex
 
-// upfActiveSessions approximates the load of a UPF by the number of UE
-// addresses allocated from all of its pools (one per PDU session anchored there).
-func upfActiveSessions(node *UPNode) int {
+// ActiveSessions approximates the number of PDU sessions anchored on a UPF by
+// the UE addresses allocated from all of its pools (one per session).
+func (node *UPNode) ActiveSessions() int {
 	n := 0
 	for _, snssaiInfo := range node.UPF.SNssaiInfos {
 		for _, dnnInfo := range snssaiInfo.DnnList {
@@ -945,20 +945,44 @@ func upfActiveSessions(node *UPNode) int {
 	return n
 }
 
-// sortUPFListByLoad orders candidates by active sessions, fewest first.
-// The input is sorted by name, and the stable sort keeps that order on ties.
+type upfLoad struct {
+	metric   int // LCI metric 0..100; 0 when the UPF has not reported any
+	reported bool
+	sessions int
+}
+
+// sortUPFListByLoad orders candidates by LCI metric (TS 29.244 §6.2.3), lowest
+// first. A UPF without LCI counts as metric 0, so a freshly scaled-out UPF is
+// preferred until it reports. Ties go to fewer active sessions; the input is
+// sorted by name and the stable sort keeps that order on full ties.
 func (upi *UserPlaneInformation) sortUPFListByLoad(upfList []*UPNode) []*UPNode {
-	loads := make(map[*UPNode]int, len(upfList))
+	loads := make(map[*UPNode]upfLoad, len(upfList))
 	for _, node := range upfList {
-		loads[node] = upfActiveSessions(node)
+		l := upfLoad{sessions: node.ActiveSessions()}
+		if lc, ok := node.UPF.LoadControl(); ok {
+			l.metric, l.reported = int(lc.Metric), true
+		}
+		loads[node] = l
 	}
 	sorted := append([]*UPNode(nil), upfList...)
-	sort.SliceStable(sorted, func(i, j int) bool { return loads[sorted[i]] < loads[sorted[j]] })
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a, b := loads[sorted[i]], loads[sorted[j]]
+		if a.metric != b.metric {
+			return a.metric < b.metric
+		}
+		return a.sessions < b.sessions
+	})
 	desc := ""
 	for _, node := range sorted {
-		desc += fmt.Sprintf(" %s=%d", upi.GetUPFNameByIp(node.NodeID.ResolveNodeIdToIp().String()), loads[node])
+		l := loads[node]
+		metric := "-"
+		if l.reported {
+			metric = fmt.Sprint(l.metric)
+		}
+		desc += fmt.Sprintf(" %s(lci=%s,sessions=%d)",
+			upi.GetUPFNameByIp(node.NodeID.ResolveNodeIdToIp().String()), metric, l.sessions)
 	}
-	logger.CtxLog.Infof("UPF selection by fewest sessions, try order:%s", desc)
+	logger.CtxLog.Infof("UPF selection by LCI metric, try order:%s", desc)
 	return sorted
 }
 

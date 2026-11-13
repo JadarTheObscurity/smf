@@ -1460,7 +1460,7 @@ func TestHandleSessionReportRequestUsesProcedureHandler(t *testing.T) {
 		ie.NewReportType(0, 0, 1, 0),
 	)
 
-	response := server.handleSessionReportRequest(request)
+	response := server.handleSessionReportRequest(request, nil)
 	if handler.request != request {
 		t.Fatal("Session Report procedure did not receive the original concrete request")
 	}
@@ -1477,7 +1477,7 @@ func TestHandleSessionReportRequestWithoutHandler(t *testing.T) {
 	server := NewPfcpServer(nil, "127.0.0.1")
 	request := message.NewSessionReportRequest(0, 0, 99, 7, 0, ie.NewReportType(0, 0, 1, 0))
 
-	response := server.handleSessionReportRequest(request)
+	response := server.handleSessionReportRequest(request, nil)
 	assertCause(t, response.Cause, ie.CauseServiceNotSupported)
 	if response.SEID() != 0 {
 		t.Fatalf("response SEID = %d, want zero when no SMF procedure handled the request", response.SEID())
@@ -2246,5 +2246,42 @@ func TestUnsupportedNodeRequestsReturnCachedRejection(t *testing.T) {
 				t.Fatalf("dispatch count after retransmission = %d, want %d", got, want)
 			}
 		})
+	}
+}
+
+type recordingLoadControlHandler struct {
+	calls []string
+}
+
+func (h *recordingLoadControlHandler) HandleLoadControlInformation(peer net.IP, seq uint32, metric uint8) {
+	h.calls = append(h.calls, fmt.Sprintf("%s seq=%d metric=%d", peer, seq, metric))
+}
+
+func TestReportLoadControl(t *testing.T) {
+	s := NewPfcpServer(nil, "127.0.0.1")
+	h := &recordingLoadControlHandler{}
+	s.SetLoadControlHandler(h)
+	peer := net.ParseIP("10.100.50.241")
+
+	s.reportLoadControl(peer, ie.NewLoadControlInformation(ie.NewSequenceNumber(7), ie.NewMetric(85)))
+	s.reportLoadControl(peer, nil)                                           // absent: ignored
+	s.reportLoadControl(peer, ie.NewLoadControlInformation(ie.NewMetric(9))) // no sequence: ignored
+
+	if len(h.calls) != 1 || h.calls[0] != "10.100.50.241 seq=7 metric=85" {
+		t.Fatalf("handler calls = %v", h.calls)
+	}
+}
+
+func TestSessionReportRequestCarriesLoadControl(t *testing.T) {
+	s := NewPfcpServer(nil, "127.0.0.1")
+	h := &recordingLoadControlHandler{}
+	s.SetLoadControlHandler(h)
+	request := message.NewSessionReportRequest(0, 0, 1, 1, 0,
+		ie.NewReportType(0, 0, 1, 0),
+		ie.NewLoadControlInformation(ie.NewSequenceNumber(3), ie.NewMetric(60)),
+	)
+	_ = s.handleSessionReportRequest(request, &net.UDPAddr{IP: net.ParseIP("10.100.50.242"), Port: 8805})
+	if len(h.calls) != 1 || h.calls[0] != "10.100.50.242 seq=3 metric=60" {
+		t.Fatalf("handler calls = %v", h.calls)
 	}
 }
