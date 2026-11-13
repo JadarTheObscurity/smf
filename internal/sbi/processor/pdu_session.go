@@ -304,6 +304,15 @@ func (p *Processor) HandlePDUSessionSMContextCreate(
 		return
 	}
 
+	// lab patch 4a: TS 23.502 4.3.2.2.1 - the SMF registers itself with the UDM
+	// (Nudm_UECM_Registration) for this PDU Session, so that the UDM can tell
+	// which SMF serves it. Upstream has UeCmRegistration() but never calls it.
+	// Done after UE IP, policy and data path selection have succeeded, so that
+	// the early rejects above never leave a registration behind; later failures
+	// are cleaned up by RemoveSMContextFromAllNF. A failure here does not reject
+	// the session (it only affects UDM-based lookups).
+	p.registerWithUDM(smContext)
+
 	// generate goroutine to handle PFCP and
 	// reply PDUSessionSMContextCreate rsp immediately
 	needUnlock = false

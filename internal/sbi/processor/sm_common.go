@@ -30,6 +30,11 @@ func (p *Processor) RemoveSMContextFromAllNF(smContext *smf_context.SMContext, s
 		}
 	}
 
+	// lab patch 4a: paths that end here (establishment reject after the UDM
+	// registration, UPF association loss) must also remove the UDM registration.
+	// The normal release paths deregister before this and clear UeCmRegistered.
+	p.deregisterFromUDM(smContext)
+
 	// Because the amfUE who called this SMF API is being locked until the API Handler returns,
 	// sending SMContext Status Notification should run asynchronously
 	// so that this function returns immediately.
