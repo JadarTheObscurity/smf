@@ -83,6 +83,11 @@ type UPF struct {
 	cancelAssociation     context.CancelFunc
 	associationGeneration uint64
 	associationLifecycle  bool
+	// removed is set once when the UPF leaves the user plane information
+	// (UPI DELETE). It ends the association lifecycle for good; a re-added
+	// UPF is a new *UPF with its own lifecycle. Guarded by associationMu.
+	removed     bool
+	removedDone chan struct{}
 
 	upFunctionFeaturesMu sync.RWMutex
 	upFunctionFeatures   []byte
@@ -192,12 +197,69 @@ func (upf *UPF) AssociationStateAndGeneration() (UPFAssociationState, uint64) {
 	return upf.associationState, upf.associationGeneration
 }
 
+// MarkRemoved records that the UPF was removed from the user plane
+// information. It is idempotent. The lifecycle owner stops reconnecting, the
+// current association context (derived from LifecycleContext) is canceled, and
+// no new setup or lifecycle can start on this *UPF.
+func (upf *UPF) MarkRemoved() {
+	upf.associationMu.Lock()
+	defer upf.associationMu.Unlock()
+	if upf.removed {
+		return
+	}
+	upf.removed = true
+	if upf.removedDone == nil {
+		upf.removedDone = make(chan struct{})
+	}
+	close(upf.removedDone)
+}
+
+// IsRemoved reports whether MarkRemoved has been called.
+func (upf *UPF) IsRemoved() bool {
+	upf.associationMu.RLock()
+	defer upf.associationMu.RUnlock()
+	return upf.removed
+}
+
+// Removed returns a channel that is closed by MarkRemoved.
+func (upf *UPF) Removed() <-chan struct{} {
+	upf.associationMu.Lock()
+	defer upf.associationMu.Unlock()
+	if upf.removedDone == nil {
+		upf.removedDone = make(chan struct{})
+		if upf.removed {
+			close(upf.removedDone)
+		}
+	}
+	return upf.removedDone
+}
+
+// LifecycleContext returns a child of parent that is also canceled when the
+// UPF is removed. The association lifecycle uses it for setup retries and as
+// the parent of every association context. The caller must call cancel.
+func (upf *UPF) LifecycleContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	removed := upf.Removed()
+	go func() {
+		select {
+		case <-removed:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
+}
+
 // BeginAssociationLifecycle elects one goroutine to own setup, monitoring,
-// cleanup and reconnect ion for this configured UPF.
+// cleanup and reconnect ion for this configured UPF. It refuses once the UPF
+// has been removed.
 func (upf *UPF) BeginAssociationLifecycle() bool {
 	upf.associationMu.Lock()
 	defer upf.associationMu.Unlock()
-	if upf.associationLifecycle {
+	if upf.associationLifecycle || upf.removed {
 		return false
 	}
 	upf.associationLifecycle = true
@@ -213,11 +275,12 @@ func (upf *UPF) EndAssociationLifecycle() {
 }
 
 // BeginAssociationSetup moves a disconnected UPF into setup state. It returns
-// false when another lifecycle operation already owns the association.
+// false when another lifecycle operation already owns the association or the
+// UPF has been removed.
 func (upf *UPF) BeginAssociationSetup() bool {
 	upf.associationMu.Lock()
 	defer upf.associationMu.Unlock()
-	if upf.associationState != AssociationDown {
+	if upf.associationState != AssociationDown || upf.removed {
 		return false
 	}
 	upf.associationState = AssociationSettingUp

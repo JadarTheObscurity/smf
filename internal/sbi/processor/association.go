@@ -40,27 +40,36 @@ func (p *Processor) getActivePFCPClient() ActivePFCPClient {
 
 func (p *Processor) ToBeAssociatedWithUPF(smfPfcpContext context.Context, upf *smf_context.UPF) {
 	if !upf.BeginAssociationLifecycle() {
-		logger.MainLog.Infof("PFCP association lifecycle for UPF%s already has an owner", formatUPF(upf))
+		if upf.IsRemoved() {
+			logger.MainLog.Infof("UPF%s was removed; not starting PFCP association lifecycle", formatUPF(upf))
+		} else {
+			logger.MainLog.Infof("PFCP association lifecycle for UPF%s already has an owner", formatUPF(upf))
+		}
 		return
 	}
 	defer upf.EndAssociationLifecycle()
 
+	// lifecycleContext ends on SMF shutdown or when the UPF is removed from
+	// the user plane information (UPI DELETE). Setup retries and every
+	// association context derive from it, so removal stops reconnecting.
+	lifecycleContext, cancelLifecycle := upf.LifecycleContext(smfPfcpContext)
+	defer cancelLifecycle()
+
 	upfStr := formatUPF(upf)
 	for {
-		select {
-		case <-smfPfcpContext.Done():
-			upf.CancelAssociation()
-			logger.MainLog.Infoln("Canceled SMF PFCP context")
+		if p.associationLifecycleEnded(lifecycleContext, upf, upfStr) {
 			return
-		default:
 		}
 
-		associationContext, established := p.ensureSetupPfcpAssociation(smfPfcpContext, upf, upfStr)
+		associationContext, established := p.ensureSetupPfcpAssociation(lifecycleContext, upf, upfStr)
 		if !established {
+			if upf.IsRemoved() {
+				logger.MainLog.Infof("UPF%s was removed; PFCP association lifecycle stopped", upfStr)
+			}
 			return
 		}
 		if smf_context.GetSelf().PfcpHeartbeatInterval == 0 {
-			p.waitForAssociationCancellation(smfPfcpContext, associationContext, upfStr)
+			p.waitForAssociationCancellation(lifecycleContext, associationContext, upfStr)
 		} else if err := p.keepHeartbeatTo(associationContext, upf, upfStr); err != nil {
 			logger.MainLog.Errorf("PFCP Heartbeat error: %v", err)
 		}
@@ -68,12 +77,29 @@ func (p *Processor) ToBeAssociatedWithUPF(smfPfcpContext context.Context, upf *s
 		// Heartbeat loss, a changed Recovery Time Stamp, or external
 		// association cancellation invalidates every PFCP session on this UPF.
 		p.releaseAllResourcesOfUPF(upf, upfStr)
-		if smfPfcpContext.Err() != nil {
-			upf.CancelAssociation()
-			logger.MainLog.Infoln("Canceled SMF PFCP context")
-			return
-		}
 	}
+}
+
+// associationLifecycleEnded reports whether the lifecycle must stop because
+// the SMF PFCP context ended or the UPF was removed. IsRemoved is checked
+// directly because UPI DELETE cancels the association synchronously, before
+// the LifecycleContext watcher goroutine may have run.
+func (p *Processor) associationLifecycleEnded(
+	lifecycleContext context.Context,
+	upf *smf_context.UPF,
+	upfStr string,
+) bool {
+	if upf.IsRemoved() {
+		upf.CancelAssociation()
+		logger.MainLog.Infof("UPF%s was removed; PFCP association lifecycle stopped", upfStr)
+		return true
+	}
+	if lifecycleContext.Err() != nil {
+		upf.CancelAssociation()
+		logger.MainLog.Infoln("Canceled SMF PFCP context")
+		return true
+	}
+	return false
 }
 
 func formatUPF(upf *smf_context.UPF) string {

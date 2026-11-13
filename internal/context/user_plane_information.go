@@ -555,6 +555,10 @@ func (upi *UserPlaneInformation) UpNodeDelete(upNodeName string) {
 	if ok {
 		logger.InitLog.Infof("UPNode [%s] found. Deleting it.\n", upNodeName)
 		if upNode.Type == UPNODE_UPF {
+			if upNode.UPF != nil {
+				// Stop the PFCP association lifecycle of the removed UPF.
+				upNode.UPF.MarkRemoved()
+			}
 			logger.InitLog.Tracef("Delete UPF [%s] from its NodeID.\n", upNodeName)
 			RemoveUPFNodeByNodeID(upNode.UPF.NodeID)
 			if _, ok = upi.UPFs[upNodeName]; ok {

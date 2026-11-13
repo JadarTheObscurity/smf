@@ -189,6 +189,10 @@ func (s *Server) DeleteUpNodeLink(c *gin.Context) {
 		if upNode, ok := upi.UPNodes[upNodeRef]; ok {
 			if upNode.Type == smf_context.UPNODE_UPF && upNode.UPF != nil {
 				go s.Processor().ReleaseAllResourcesOfUPF(upNode.UPF)
+				// Mark removed before canceling so the lifecycle owner sees it
+				// and does not set up a new association (UpNodeDelete marks
+				// it again, idempotently).
+				upNode.UPF.MarkRemoved()
 				upNode.UPF.CancelAssociation()
 			}
 			upi.UpNodeDelete(upNodeRef)
