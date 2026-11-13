@@ -23,6 +23,23 @@ type PDUSessionInfo struct {
 	SessionRule  models.Pcf_SMPolCtrl_SessionRule
 	UpCnxState   models.Smf_PDUSess_UpCnxState
 	Tunnel       context.UPTunnel
+	// lab patch 4b: the PSA UPF of this session (smContext.SelectedUPF, the UPF
+	// whose pool PDUAddress was allocated from). Omitted when no UPF is selected.
+	PsaUpf *PSAUpfInfo `json:",omitempty"`
+}
+
+// PSAUpfInfo identifies a UPF the same way UPI does: Name is the key used in
+// userplaneInformation / UPI upNodesLinks, NodeID is its PFCP Node ID.
+type PSAUpfInfo struct {
+	Name   string
+	NodeID string
+}
+
+func psaUpfInfo(upNode *context.UPNode) *PSAUpfInfo {
+	if upNode == nil {
+		return nil
+	}
+	return &PSAUpfInfo{Name: upNode.Name, NodeID: upNode.NodeID.String()}
 }
 
 func (p *Processor) HandleOAMGetUEPDUSessionInfo(c *gin.Context, smContextRef string) {
@@ -43,6 +60,7 @@ func (p *Processor) HandleOAMGetUEPDUSessionInfo(c *gin.Context, smContextRef st
 		AnType:       smContext.AnType,
 		PDUAddress:   smContext.PDUAddress.String(),
 		UpCnxState:   smContext.UpCnxState,
+		PsaUpf:       psaUpfInfo(smContext.SelectedUPF),
 		// Tunnel: context.UPTunnel{
 		// 	//UpfRoot:  smContext.Tunnel.UpfRoot,
 		// 	ULCLRoot: smContext.Tunnel.UpfRoot,
