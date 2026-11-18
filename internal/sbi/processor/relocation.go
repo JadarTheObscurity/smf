@@ -24,15 +24,18 @@ import (
 //     §5.6.9.2.1), so this is refused unless force is set. TS 23.501 §5.6.9.3
 //     NOTE 2 still allows a release with reactivation for restoration or user
 //     plane path optimization, at the cost of an interruption.
-//   - SSC mode 3: make-before-break with PDU Session Modification Command #39
-//     (TS 23.502 §4.3.5.2), not implemented yet (lab patch 6b).
+//   - SSC mode 3: make-before-break, TS 23.502 §4.3.5.2 (lab patch 6b/6c, see
+//     ssc3_relocation.go): PDU Session Modification Command #39 with the PDU
+//     session address lifetime; the old session stays up until T3593 expires
+//     or the UE releases it.
 
 // relocationTimeout bounds the PFCP Session Deletion of the old session.
 const relocationTimeout = 10 * time.Second
 
 // Relocation procedures, as reported by the API.
 const (
-	relocationRelease39 = "PDU Session Release Command #39"
+	relocationRelease39      = "PDU Session Release Command #39"
+	relocationModification39 = "PDU Session Modification Command #39"
 )
 
 // relocationDecision checks whether a session in this state and SSC mode can
@@ -49,8 +52,7 @@ func relocationDecision(state smf_context.SMContextState, sscMode uint8, force b
 	case nasie.SSCMODE2:
 		return relocationRelease39, http.StatusAccepted, ""
 	case nasie.SSCMODE3:
-		return "", http.StatusNotImplemented,
-			"SSC mode 3 relocation (PDU Session Modification Command #39, TS 23.502 §4.3.5.2) is not implemented yet"
+		return relocationModification39, http.StatusAccepted, ""
 	default:
 		if force {
 			return relocationRelease39, http.StatusAccepted, ""
@@ -62,8 +64,9 @@ func relocationDecision(state smf_context.SMContextState, sscMode uint8, force b
 }
 
 // RelocatePDUSession runs the PSA relocation of the PDU session with this SM
-// context reference and returns the HTTP status and body for the UPI.
-func (p *Processor) RelocatePDUSession(smContextRef string, force bool) (int, gin.H) {
+// context reference and returns the HTTP status and body for the UPI. lifetime
+// is the PDU session address lifetime for SSC mode 3 (0: the default).
+func (p *Processor) RelocatePDUSession(smContextRef string, force bool, lifetime time.Duration) (int, gin.H) {
 	smContext := smf_context.GetSMContextByRef(smContextRef)
 	if smContext == nil {
 		return http.StatusNotFound, gin.H{"error": "no PDU session with this smContextRef"}
@@ -80,6 +83,11 @@ func (p *Processor) RelocatePDUSession(smContextRef string, force bool) (int, gi
 		"sscMode":      smf_context.SSCModeString(mode),
 	}
 	procedure, status, reason := relocationDecision(smContext.State(), mode, force)
+	if procedure != "" && smContext.SSC3Relocation != nil {
+		procedure, status, reason = "", http.StatusConflict,
+			"an SSC mode 3 relocation of this PDU session is already in progress ("+
+				smContext.SSC3Relocation.Phase()+")"
+	}
 	if procedure == "" {
 		body["error"] = reason
 		smContext.Log.Warnf("PSA relocation refused: %s", reason)
@@ -101,16 +109,37 @@ func (p *Processor) RelocatePDUSession(smContextRef string, force bool) (int, gi
 			&smf_context.SNssai{Sst: smContext.SNssai.Sst, Sd: smContext.SNssai.Sd}, oldPSA)
 	}
 
-	// TS 23.502 §4.3.4.2: release the N4 session(s), then send the Release
-	// Command through Namf_Communication_N1N2MessageTransfer.
+	if procedure == relocationModification39 {
+		if lifetime <= 0 {
+			lifetime = smf_context.DefaultPDUSessionAddressLifetime
+		}
+		body["lifetime"] = int(lifetime / time.Second)
+		if err := p.startSSC3Relocation(smContext, oldPSA, lifetime); err != nil {
+			body["error"] = err.Error()
+			return http.StatusServiceUnavailable, body
+		}
+		return http.StatusAccepted, body
+	}
+
+	if err := p.releasePDUSessionByNetwork(smContext, nasie.Cause5GSM_ReactivationReq); err != nil {
+		body["pfcpError"] = err.Error()
+	}
+	return http.StatusAccepted, body
+}
+
+// releasePDUSessionByNetwork runs the network-requested PDU session release of
+// TS 23.502 §4.3.4.2: delete the N4 session(s), end charging, then send the
+// Release Command with this cause through Namf_Communication_N1N2MessageTransfer.
+// The caller holds SMLock. A PFCP error is returned but does not stop the
+// release.
+func (p *Processor) releasePDUSessionByNetwork(smContext *smf_context.SMContext, cause uint8) error {
 	ctx, cancel := context.WithTimeout(context.Background(), relocationTimeout)
 	defer cancel()
 	deleted, attempted, err := p.deletePDUSessionPFCPSessions(ctx, smContext)
 	smContext.PFCPReleaseDone = err == nil
 	if err != nil {
-		smContext.Log.Warnf("PSA relocation: deleted PFCP sessions %d/%d: %v", deleted, attempted, err)
-		body["pfcpError"] = err.Error()
+		smContext.Log.Warnf("network-requested release: deleted PFCP sessions %d/%d: %v", deleted, attempted, err)
 	}
-	p.finalizePDUSessionRelease(smContext, nasie.Cause5GSM_ReactivationReq)
-	return http.StatusAccepted, body
+	p.finalizePDUSessionRelease(smContext, cause)
+	return err
 }

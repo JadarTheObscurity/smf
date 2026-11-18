@@ -143,6 +143,11 @@ type SMContext struct {
 	// SSC modes this session may use (sorted); sent in the Allowed SSC mode IE
 	// when the request is rejected with #68.
 	AllowedSSCModes []uint8
+	// lab patch 6b/6c: SSC mode 3 relocation in progress on this (old) session,
+	// and, on a new session, the PDU session ID it replaces (oldPduSessionId of
+	// Nsmf_PDUSession_CreateSMContext).
+	SSC3Relocation       *SSC3Relocation
+	ReplacesPDUSessionID int32
 
 	DnnConfiguration models.Udm_SDM_DnnConfiguration
 

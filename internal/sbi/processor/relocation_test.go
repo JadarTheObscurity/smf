@@ -22,8 +22,8 @@ func TestRelocationDecision(t *testing.T) {
 		{"mode 1 refused", smf_context.Active, nasie.SSCMODE1, false, "", http.StatusConflict},
 		{"mode 1 forced", smf_context.Active, nasie.SSCMODE1, true, relocationRelease39, http.StatusAccepted},
 		{"pre-6a session counts as mode 1", smf_context.Active, 0, false, "", http.StatusConflict},
-		{"mode 3 not yet", smf_context.Active, nasie.SSCMODE3, false, "", http.StatusNotImplemented},
-		{"mode 3 force does not help", smf_context.Active, nasie.SSCMODE3, true, "", http.StatusNotImplemented},
+		{"mode 3 make-before-break", smf_context.Active, nasie.SSCMODE3, false, relocationModification39, http.StatusAccepted},
+		{"mode 3 force changes nothing", smf_context.Active, nasie.SSCMODE3, true, relocationModification39, http.StatusAccepted},
 		{"not active", smf_context.ActivePending, nasie.SSCMODE2, false, "", http.StatusConflict},
 		{"releasing", smf_context.InActivePending, nasie.SSCMODE2, true, "", http.StatusConflict},
 	}

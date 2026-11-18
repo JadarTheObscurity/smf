@@ -2,6 +2,8 @@ package sbi
 
 import (
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -62,12 +64,24 @@ func (s *Server) getUPIRoutes() []Route {
 }
 
 // RelocatePDUSession moves one PDU session to another PSA, by the procedure its
-// SSC mode allows (lab patch 5). Query force=true also relocates an SSC mode 1
-// session. 202: the release was sent; 404: no such session; 409: not Active or
-// SSC mode 1 without force; 501: SSC mode 3 (not implemented yet).
+// SSC mode allows (lab patch 5, 6b). Query force=true also relocates an SSC
+// mode 1 session; lifetime=<s> sets the PDU session address lifetime for SSC
+// mode 3. 202: the command was sent; 400: bad lifetime; 404: no such session;
+// 409: not Active, SSC mode 1 without force, or a relocation already in
+// progress; 503: the AMF did not take the SSC mode 3 Modification Command.
 func (s *Server) RelocatePDUSession(c *gin.Context) {
 	force := c.Query("force") == "true"
-	status, body := s.Processor().RelocatePDUSession(c.Params.ByName("smContextRef"), force)
+	// lab patch 6b: PDU session address lifetime for SSC mode 3, in seconds
+	var lifetime time.Duration
+	if v := c.Query("lifetime"); v != "" {
+		secs, err := strconv.Atoi(v)
+		if err != nil || secs < 1 || secs > 65535 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "lifetime must be 1..65535 seconds"})
+			return
+		}
+		lifetime = time.Duration(secs) * time.Second
+	}
+	status, body := s.Processor().RelocatePDUSession(c.Params.ByName("smContextRef"), force, lifetime)
 	if status >= http.StatusBadRequest {
 		c.Set(sbi.IN_PB_DETAILS_CTX_STR, http.StatusText(status))
 	}

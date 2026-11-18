@@ -97,6 +97,7 @@ func (p *Processor) HandlePDUSessionSMContextCreate(
 	smContext.SetState(smf_context.ActivePending)
 	smContext.Smf_PDUSess_SmContextCreateData = createData
 	smContext.SmStatusNotifyUri = createData.SmContextStatusUri
+	linkSSC3Relocation(smContext, createData.OldPduSessionId) // lab patch 6c
 
 	smContext.SMLock.Lock()
 	needUnlock := true
@@ -539,6 +540,7 @@ func (p *Processor) HandlePDUSessionSMContextUpdate(
 			return
 		case *message.PDUSessModComplete:
 			smContext.StopT3591()
+			p.onSSC3ModificationComplete(smContext) // lab patch 6b/6c
 		case *message.PDUSessModRej:
 			smContext.StopT3591()
 		}

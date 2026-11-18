@@ -28,6 +28,30 @@ type PDUSessionInfo struct {
 	PsaUpf *PSAUpfInfo `json:",omitempty"`
 	// lab patch 6a: the SSC mode selected for this session ("SSC_MODE_1".."3").
 	SscMode string `json:",omitempty"`
+	// lab patch 6b/6c: SSC mode 3 relocation in progress on this (old) session,
+	// and the PDU session ID a new session replaces.
+	SscRelocation        *SSC3RelocationInfo `json:",omitempty"`
+	ReplacesPduSessionId int32               `json:",omitempty"`
+}
+
+// SSC3RelocationInfo is the OAM view of smf_context.SSC3Relocation.
+type SSC3RelocationInfo struct {
+	Phase           string // "commanded" or "t3593"
+	OldPsa          string
+	LifetimeSeconds int
+	NewPduSessionId int32 `json:",omitempty"`
+}
+
+func ssc3RelocationInfo(r *context.SSC3Relocation) *SSC3RelocationInfo {
+	if r == nil {
+		return nil
+	}
+	return &SSC3RelocationInfo{
+		Phase:           r.Phase(),
+		OldPsa:          r.OldPSA,
+		LifetimeSeconds: int(r.Lifetime.Seconds()),
+		NewPduSessionId: r.NewPduSessionID,
+	}
 }
 
 // PSAUpfInfo identifies a UPF the same way UPI does: Name is the key used in
@@ -54,16 +78,18 @@ func (p *Processor) HandleOAMGetUEPDUSessionInfo(c *gin.Context, smContextRef st
 	}
 
 	pduSessionInfo := &PDUSessionInfo{
-		Supi:         smContext.Supi,
-		PDUSessionID: strconv.Itoa(int(smContext.PDUSessionID)),
-		Dnn:          smContext.Dnn,
-		Sst:          strconv.Itoa(int(smContext.SNssai.Sst)),
-		Sd:           smContext.SNssai.Sd,
-		AnType:       smContext.AnType,
-		PDUAddress:   smContext.PDUAddress.String(),
-		UpCnxState:   smContext.UpCnxState,
-		PsaUpf:       psaUpfInfo(smContext.SelectedUPF),
-		SscMode:      context.SSCModeString(smContext.SelectedSSCMode),
+		Supi:                 smContext.Supi,
+		PDUSessionID:         strconv.Itoa(int(smContext.PDUSessionID)),
+		Dnn:                  smContext.Dnn,
+		Sst:                  strconv.Itoa(int(smContext.SNssai.Sst)),
+		Sd:                   smContext.SNssai.Sd,
+		AnType:               smContext.AnType,
+		PDUAddress:           smContext.PDUAddress.String(),
+		UpCnxState:           smContext.UpCnxState,
+		PsaUpf:               psaUpfInfo(smContext.SelectedUPF),
+		SscMode:              context.SSCModeString(smContext.SelectedSSCMode),
+		SscRelocation:        ssc3RelocationInfo(smContext.SSC3Relocation),
+		ReplacesPduSessionId: smContext.ReplacesPDUSessionID,
 		// Tunnel: context.UPTunnel{
 		// 	//UpfRoot:  smContext.Tunnel.UpfRoot,
 		// 	ULCLRoot: smContext.Tunnel.UpfRoot,
