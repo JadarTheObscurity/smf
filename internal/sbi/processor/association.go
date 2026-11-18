@@ -314,7 +314,7 @@ func (p *Processor) releaseAllResourcesOfUPF(upf *smf_context.UPF, upfStr string
 		defer smContext.SMLock.Unlock()
 		switch smContext.State() {
 		case smf_context.Active, smf_context.ModificationPending, smf_context.PFCPModification:
-			needToSendNotify, removeContext := p.requestAMFToReleasePDUResources(smContext)
+			needToSendNotify, removeContext := p.requestAMFToReleasePDUResources(smContext, nasie.Cause5GSM_NwFailure)
 			if needToSendNotify {
 				p.SendReleaseNotification(smContext)
 			}
@@ -326,8 +326,10 @@ func (p *Processor) releaseAllResourcesOfUPF(upf *smf_context.UPF, upfStr string
 	})
 }
 
+// lab patch 5: the 5GSM cause is a parameter (#38 when the UPF is lost, #39
+// "reactivation requested" for a PSA relocation).
 func (p *Processor) requestAMFToReleasePDUResources(
-	smContext *smf_context.SMContext,
+	smContext *smf_context.SMContext, cause uint8,
 ) (sendNotify bool, releaseContext bool) {
 	n1n2Request := models.N1N2MessageTransferRequestBody{}
 	// TS 23.502 4.3.4.2 3b. Send Namf_Communication_N1N2MessageTransfer Request, SMF->AMF
@@ -335,7 +337,6 @@ func (p *Processor) requestAMFToReleasePDUResources(
 		PduSessionId: smContext.PDUSessionID,
 		SkipInd:      true,
 	}
-	cause := nasie.Cause5GSM_NwFailure
 	if buf, err := smf_context.BuildGSMPDUSessionReleaseCommand(smContext, cause, false); err != nil {
 		logger.MainLog.Errorf("Build GSM PDUSessionReleaseCommand failed: %+v", err)
 	} else {

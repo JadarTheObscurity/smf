@@ -11,6 +11,7 @@ import (
 	"github.com/wmnsk/go-pfcp/ie"
 	"github.com/wmnsk/go-pfcp/message"
 
+	nasie "github.com/free5gc/nas/ie"
 	smf_context "github.com/free5gc/smf/internal/context"
 	"github.com/free5gc/smf/internal/logger"
 	"github.com/free5gc/smf/pkg/factory"
@@ -125,6 +126,25 @@ func (p *Processor) terminateAssociationAffectedPDUSession(
 		return 0, 0, nil
 	}
 
+	deleted, attempted, resultErr = p.deletePDUSessionPFCPSessions(ctx, smContext)
+
+	// This is a forced PDU Session termination. PFCP transaction errors are
+	// reported, but they must not leave charging and AMF resources alive after
+	// the UPF association is gone. Available final reports are consumed first.
+	// A later AMF release can retry only the PFCP sessions that did not complete.
+	smContext.PFCPReleaseDone = resultErr == nil
+	p.finalizeAssociationAffectedPDUSession(smContext)
+	return deleted, attempted, resultErr
+}
+
+// deletePDUSessionPFCPSessions deletes every PFCP session of the PDU session on
+// its UPF and consumes the final Usage Reports. The caller holds SMLock.
+// (lab patch 5: split out of terminateAssociationAffectedPDUSession so a single
+// PDU session can be released for PSA relocation.)
+func (p *Processor) deletePDUSessionPFCPSessions(
+	ctx context.Context,
+	smContext *smf_context.SMContext,
+) (deleted int, attempted int, resultErr error) {
 	var deletionErrors []error
 	for _, sessionContext := range smContext.PFCPContext {
 		if sessionContext == nil || sessionContext.RemoteSEID == 0 {
@@ -146,13 +166,6 @@ func (p *Processor) terminateAssociationAffectedPDUSession(
 		}
 		deleted++
 	}
-
-	// This is a forced PDU Session termination. PFCP transaction errors are
-	// reported, but they must not leave charging and AMF resources alive after
-	// the UPF association is gone. Available final reports are consumed first.
-	// A later AMF release can retry only the PFCP sessions that did not complete.
-	smContext.PFCPReleaseDone = len(deletionErrors) == 0
-	p.finalizeAssociationAffectedPDUSession(smContext)
 	return deleted, attempted, errors.Join(deletionErrors...)
 }
 
@@ -217,6 +230,13 @@ func (p *Processor) deleteAssociationPFCPSession(
 }
 
 func (p *Processor) finalizeAssociationAffectedPDUSession(smContext *smf_context.SMContext) {
+	p.finalizePDUSessionRelease(smContext, nasie.Cause5GSM_NwFailure)
+}
+
+// finalizePDUSessionRelease ends charging and asks the AMF to release the PDU
+// session with the given 5GSM cause (lab patch 5: #38 for a lost UPF, #39 for a
+// PSA relocation).
+func (p *Processor) finalizePDUSessionRelease(smContext *smf_context.SMContext, cause uint8) {
 	if p == nil || p.ProcessorSmf == nil {
 		// Unit tests may construct a Processor without the service/consumer.
 		logger.PfcpLog.Warnf(
@@ -227,7 +247,7 @@ func (p *Processor) finalizeAssociationAffectedPDUSession(smContext *smf_context
 	}
 
 	p.ReleaseChargingSession(smContext)
-	sendNotification, removeContext := p.requestAMFToReleasePDUResources(smContext)
+	sendNotification, removeContext := p.requestAMFToReleasePDUResources(smContext, cause)
 	if sendNotification {
 		p.SendReleaseNotification(smContext)
 	}

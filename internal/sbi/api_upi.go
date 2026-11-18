@@ -46,12 +46,32 @@ func (s *Server) getUPIRoutes() []Route {
 			APIFunc: s.GetLoadControl,
 		},
 		{
+			// lab patch 5: network-triggered PSA relocation of one PDU session
+			Name:    "RelocatePDUSession",
+			Method:  http.MethodPost,
+			Pattern: "/sessions/:smContextRef/relocate",
+			APIFunc: s.RelocatePDUSession,
+		},
+		{
 			Name:    "PutUpNodeLoadControl",
 			Method:  http.MethodPut,
 			Pattern: "/upNodesLinks/:upNodeRef/lci",
 			APIFunc: s.PutUpNodeLoadControl,
 		},
 	}
+}
+
+// RelocatePDUSession moves one PDU session to another PSA, by the procedure its
+// SSC mode allows (lab patch 5). Query force=true also relocates an SSC mode 1
+// session. 202: the release was sent; 404: no such session; 409: not Active or
+// SSC mode 1 without force; 501: SSC mode 3 (not implemented yet).
+func (s *Server) RelocatePDUSession(c *gin.Context) {
+	force := c.Query("force") == "true"
+	status, body := s.Processor().RelocatePDUSession(c.Params.ByName("smContextRef"), force)
+	if status >= http.StatusBadRequest {
+		c.Set(sbi.IN_PB_DETAILS_CTX_STR, http.StatusText(status))
+	}
+	c.JSON(status, body)
 }
 
 // GetLoadControl lists, per UPF, the LCI used for UPF selection, the active

@@ -541,6 +541,8 @@ type UPFSelectionParams struct {
 	SNssai     *SNssai
 	Dnai       string
 	PDUAddress net.IP
+	// lab patch 5: UPF (name) to try last, the old PSA of a relocated session
+	AvoidUPF string
 }
 
 // UPFInterfaceInfo store the UPF interface information
@@ -636,6 +638,10 @@ func (upfSelectionParams *UPFSelectionParams) String() string {
 	Dnai := upfSelectionParams.Dnai
 	if Dnai != "" {
 		str += fmt.Sprintf("DNAI: %s\n", Dnai)
+	}
+
+	if upfSelectionParams.AvoidUPF != "" {
+		str += fmt.Sprintf("AvoidUPF: %s\n", upfSelectionParams.AvoidUPF)
 	}
 
 	pduAddress := upfSelectionParams.PDUAddress

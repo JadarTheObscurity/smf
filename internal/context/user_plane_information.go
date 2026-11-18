@@ -1008,6 +1008,7 @@ func (upi *UserPlaneInformation) SelectUPFAndAllocUEIP(selection *UPFSelectionPa
 	}
 	UPFList = upi.sortUPFListByName(UPFList)
 	sortedUPFList := upi.sortUPFListByLoad(UPFList)
+	sortedUPFList = upi.deprioritizeUPF(sortedUPFList, selection.AvoidUPF) // lab patch 5
 	for _, upf := range sortedUPFList {
 		logger.CtxLog.Debugf("check start UPF: %s",
 			upi.GetUPFNameByIp(upf.NodeID.ResolveNodeIdToIp().String()))

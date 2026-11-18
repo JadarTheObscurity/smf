@@ -603,6 +603,13 @@ func (c *SMContext) AllocUeIP() error {
 		},
 	}
 
+	// lab patch 5: a session re-established after a PSA relocation tries the
+	// old PSA last.
+	if avoid, ok := TakeRelocationHint(c.Supi, c.Dnn, c.SelectionParam.SNssai); ok {
+		c.SelectionParam.AvoidUPF = avoid
+		c.Log.Infof("PSA relocation: avoiding old PSA %s", avoid)
+	}
+
 	if len(c.DnnConfiguration.StaticIpAddress) > 0 {
 		staticIPConfig := c.DnnConfiguration.StaticIpAddress[0]
 		if staticIPConfig.Ipv4Addr != "" {
