@@ -26,6 +26,8 @@ type PDUSessionInfo struct {
 	// lab patch 4b: the PSA UPF of this session (smContext.SelectedUPF, the UPF
 	// whose pool PDUAddress was allocated from). Omitted when no UPF is selected.
 	PsaUpf *PSAUpfInfo `json:",omitempty"`
+	// lab patch 6a: the SSC mode selected for this session ("SSC_MODE_1".."3").
+	SscMode string `json:",omitempty"`
 }
 
 // PSAUpfInfo identifies a UPF the same way UPI does: Name is the key used in
@@ -61,6 +63,7 @@ func (p *Processor) HandleOAMGetUEPDUSessionInfo(c *gin.Context, smContextRef st
 		PDUAddress:   smContext.PDUAddress.String(),
 		UpCnxState:   smContext.UpCnxState,
 		PsaUpf:       psaUpfInfo(smContext.SelectedUPF),
+		SscMode:      context.SSCModeString(smContext.SelectedSSCMode),
 		// Tunnel: context.UPTunnel{
 		// 	//UpfRoot:  smContext.Tunnel.UpfRoot,
 		// 	ULCLRoot: smContext.Tunnel.UpfRoot,

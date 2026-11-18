@@ -17,8 +17,13 @@ func BuildGSMPDUSessionEstablishmentAccept(smContext *SMContext) ([]byte, error)
 			Value: smContext.SelectedPDUSessionType,
 		},
 		SelectedSSCMode: &nasie.SSCMode{
-			Mode: nasie.SSCMODE1,
+			Mode: smContext.SelectedSSCMode,
 		},
+	}
+	// lab patch 6a: SelectSSCMode runs for every Establishment Request; keep
+	// the old answer if it somehow did not.
+	if accept.SelectedSSCMode.Mode == 0 {
+		accept.SelectedSSCMode.Mode = nasie.SSCMODE1
 	}
 
 	if v := smContext.EstAcceptCause5gSMValue; v != 0 {
@@ -150,7 +155,17 @@ func BuildGSMPDUSessionEstablishmentReject(smContext *SMContext, cause uint8) ([
 		PTI:       smContext.Pti,
 		Cause5GSM: &nasie.Cause5GSM{Value: cause},
 	}
-	return reject.MarshalBinary()
+	b, err := reject.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	// lab patch 6a: #68 carries the SSC modes the UE may use (TS 24.501
+	// §6.4.1.4.2). Allowed SSC mode is the only optional IE set here, so
+	// appending it keeps the IE order of §8.3.3.
+	if cause == nasie.Cause5GSM_NotSupportedSSCMode && len(smContext.AllowedSSCModes) > 0 {
+		b = append(b, allowedSSCModeIE(smContext.AllowedSSCModes))
+	}
+	return b, nil
 }
 
 // BuildGSMPDUSessionReleaseCommand makes a plain NAS message.

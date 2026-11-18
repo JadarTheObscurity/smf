@@ -136,6 +136,13 @@ type SMContext struct {
 	PDUAddress             net.IP
 	UseStaticIP            bool
 	SelectedPDUSessionType uint8
+	// lab patch 6a: SSC mode the UE requested (0 = not included) and the one
+	// the SMF selected and sent in the Establishment Accept (nasie.SSCMODE1..3).
+	RequestedSSCMode uint8
+	SelectedSSCMode  uint8
+	// SSC modes this session may use (sorted); sent in the Allowed SSC mode IE
+	// when the request is rejected with #68.
+	AllowedSSCModes []uint8
 
 	DnnConfiguration models.Udm_SDM_DnnConfiguration
 

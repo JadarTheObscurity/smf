@@ -74,6 +74,20 @@ func HandlePDUSessionEstablishmentRequest(
 		}
 	}
 
+	// lab patch 6a: select the SSC mode from the request, the subscription
+	// (DnnConfiguration is already filled from Nudm_SDM_Get) and the PDU
+	// session type selected above; reject with #68 when it is not allowed.
+	var requestedSSCMode uint8
+	if req.SSCMode != nil {
+		requestedSSCMode = req.SSCMode.Mode
+	}
+	if err := smCtx.SelectSSCMode(requestedSSCMode); err != nil {
+		logger.GsmLog.Errorf("%s", err)
+		return &GSMError{
+			GSMCause: nasie.Cause5GSM_NotSupportedSSCMode,
+		}
+	}
+
 	if req.ExtendedProtCfgOpts != nil && req.ExtendedProtCfgOpts.FromMs != nil {
 		fromMs := req.ExtendedProtCfgOpts.FromMs
 		logger.GsmLog.Infoln("Protocol Configuration Options")
